@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* quick tokens */
+:root {
+    --bg: #fff7f7;
+  }
+  body { @apply bg-[var(--bg)] text-slate-800; }
