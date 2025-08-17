@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { apiService } from "./services/api.js";
 import PdfViewer from "./components/PdfViewer";
 import Snippets from "./components/Snippets";
+import InsightPanel from "./components/InsightPanel";
+import ThemeToggle from "./components/ThemeToggle";
+import { useTheme } from "./context/ThemeContext";
 import toast, { Toaster } from "react-hot-toast";
 
 function App() {
@@ -11,6 +14,7 @@ function App() {
   const [clusterId, setClusterId] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [activeTab, setActiveTab] = useState('snippets');
   
   // New state for uploaded documents
   const [uploadedDocuments, setUploadedDocuments] = useState([]);
@@ -23,6 +27,13 @@ function App() {
   // Snippets and semantic search state
   const [snippets, setSnippets] = useState([]);
   const [isSearchingSnippets, setIsSearchingSnippets] = useState(false);
+  const [contradictions, setContradictions] = useState([]);
+  const [alternateViewpoints, setAlternateViewpoints] = useState([]);
+  
+  // Podcast state
+  const [podcastAudioId, setPodcastAudioId] = useState(null);
+  const [isGeneratingPodcast, setIsGeneratingPodcast] = useState(false);
+  const [podcastAudioUrl, setPodcastAudioUrl] = useState(null);
 
   // Fetch uploaded documents on component mount
   useEffect(() => {
@@ -51,13 +62,49 @@ function App() {
     setIsLoadingSections(true);
     
     try {
+      // Fetch PDF directly instead of sections
+      toast.loading("Fetching PDF...");
+      const pdfBlob = await apiService.getDocumentPdf(document._id);
+      
+      // Create a file object from the blob to display in the PDF viewer
+      const file = new File([pdfBlob], `${document._id}.pdf`, { type: 'application/pdf' });
+      setSelectedFile(file);
+      
+      toast.dismiss();
+      toast.success("PDF loaded in viewer");
+      
+      // Still fetch sections in background for other functionality
       const response = await apiService.getDocumentSections(document._id);
       setDocumentSections(response.sections || []);
     } catch (error) {
-      console.error("Failed to fetch document sections:", error);
+      console.error("Failed to fetch PDF or sections:", error);
       setDocumentSections([]);
+      toast.dismiss();
+      toast.error(`Failed to load document: ${error.message}`);
     } finally {
       setIsLoadingSections(false);
+    }
+  };
+  
+  // Handle viewing original PDF
+  const handleViewOriginalPdf = async (documentId) => {
+    try {
+      toast.loading("Fetching PDF...");
+      const pdfBlob = await apiService.getDocumentPdf(documentId);
+      
+      // Create a URL for the blob
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      
+      // Create a file object from the blob to display in the PDF viewer
+      const file = new File([pdfBlob], `${documentId}.pdf`, { type: 'application/pdf' });
+      setSelectedFile(file);
+      
+      toast.dismiss();
+      toast.success("PDF loaded in viewer");
+    } catch (error) {
+      console.error("Failed to fetch PDF:", error);
+      toast.dismiss();
+      toast.error(`Failed to load PDF: ${error.message}`);
     }
   };
 
@@ -71,10 +118,15 @@ function App() {
     setSelectedText(text);
     setIsSearchingSnippets(true);
     setSnippets([]);
+    // Reset podcast state
+    setPodcastAudioId(null);
+    setPodcastAudioUrl(null);
 
     try {
       const searchResults = await apiService.semanticSearch(text);
       setSnippets(searchResults.snippets || []);
+      setContradictions(searchResults.contradictions || []);
+      setAlternateViewpoints(searchResults.alternate_viewpoints || []);
       
       if (searchResults.snippets && searchResults.snippets.length > 0) {
         toast.success(`Found ${searchResults.snippets.length} relevant snippets`);
@@ -86,6 +138,43 @@ function App() {
       toast.error("Failed to search for relevant snippets");
     } finally {
       setIsSearchingSnippets(false);
+    }
+  };
+  
+  // Generate podcast from selected text and insights
+  const handleGeneratePodcast = async () => {
+    if (!selectedText || selectedText.trim().length < 10) {
+      toast.error("Please select text before generating a podcast");
+      return;
+    }
+    
+    setIsGeneratingPodcast(true);
+    setPodcastAudioUrl(null);
+    
+    try {
+      toast.loading("Generating podcast audio...");
+      const result = await apiService.generatePodcast(
+        selectedText,
+        snippets,
+        contradictions,
+        alternateViewpoints
+      );
+      
+      setPodcastAudioId(result.audio_id);
+      
+      // Fetch the audio file
+      const audioBlob = await apiService.getPodcastAudio(result.audio_id);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      setPodcastAudioUrl(audioUrl);
+      
+      toast.dismiss();
+      toast.success("Podcast generated successfully!");
+    } catch (error) {
+      console.error("Failed to generate podcast:", error);
+      toast.dismiss();
+      toast.error(`Failed to generate podcast: ${error.message}`);
+    } finally {
+      setIsGeneratingPodcast(false);
     }
   };
 
@@ -167,13 +256,15 @@ function App() {
     }
   };
 
+  const { isDarkMode } = useTheme();
+  
   return (
-    <div className="flex flex-col h-screen bg-red-50">
+    <div className={`flex flex-col h-screen bg-[var(--bg)]`}>
       {/* Notification */}
       <Toaster />
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b bg-red-50">
-        <h1 className="text-xl font-bold flex items-center gap-2 text-gray-800">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-[var(--border-color)] bg-[var(--bg)]">
+        <h1 className="text-xl font-bold flex items-center gap-2 text-[var(--text-primary)]">
           <span className="bg-red-600 text-white p-2 rounded">📑</span>
           Document Insight Engine
         </h1>
@@ -182,8 +273,9 @@ function App() {
             Adobe India Hackathon
           </button>
           {clusterId && (
-            <span className="text-gray-600">Cluster: {clusterId}</span>
+            <span className="text-[var(--text-secondary)]">Cluster: {clusterId}</span>
           )}
+          <ThemeToggle />
           <button>⚙️</button>
         </div>
       </div>
@@ -191,19 +283,19 @@ function App() {
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar */}
-        <div className="w-72 border-r bg-red-50 p-4 overflow-y-auto">
-          <h2 className="font-semibold mb-2">Upload Documents</h2>
+        <div className="w-72 border-r border-[var(--border-color)] bg-[var(--sidebar-bg)] p-4 overflow-y-auto">
+          <h2 className="font-semibold mb-2 text-[var(--text-primary)]">Upload Documents</h2>
 
           {/* File Input */}
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center mb-4 bg-white">
+          <div className="border-2 border-dashed border-[var(--border-color)] rounded-lg p-6 text-center mb-4 bg-[var(--card-bg)]">
             <input
-              type="file"
-              accept="application/pdf"
-              multiple
-              onChange={handleFileUpload}
-              className="block w-full text-sm text-gray-700 cursor-pointer"
-            />
-            <p className="text-gray-500 text-xs mt-2">
+                type="file"
+                accept="application/pdf"
+                multiple
+                onChange={handleFileUpload}
+                className="block w-full text-sm text-[var(--text-primary)] cursor-pointer"
+              />
+              <p className="text-[var(--text-secondary)] text-xs mt-2">
               Upload multiple PDFs to analyze connections
             </p>
           </div>
@@ -231,7 +323,7 @@ function App() {
 
           {/* Document Library */}
           <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold">Document Library</h2>
+            <h2 className="font-semibold text-[var(--text-primary)]">Document Library</h2>
             <button
               onClick={fetchUploadedDocuments}
               disabled={isLoadingDocuments}
@@ -241,14 +333,20 @@ function App() {
             </button>
           </div>
           
+          <input
+            type="text"
+            placeholder="Search documents..."
+            className="w-full p-2 border border-[var(--border-color)] rounded mb-4 bg-[var(--card-bg)] text-[var(--text-primary)] placeholder-[var(--text-secondary)]"
+          />
+          
           {isLoadingDocuments ? (
-            <p className="text-sm text-gray-500 mb-4">Loading documents...</p>
+            <p className="text-sm text-[var(--text-secondary)] mb-4">Loading documents...</p>
           ) : documentError ? (
             <div className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded mb-4 text-xs">
               {documentError}
             </div>
           ) : uploadedDocuments.length === 0 ? (
-            <p className="text-sm text-gray-500 mb-4">No documents uploaded</p>
+            <p className="text-sm text-[var(--text-secondary)] mb-4">No documents uploaded</p>
           ) : (
             <ul className="space-y-2 mb-4">
               {uploadedDocuments.map((document, index) => (
@@ -256,20 +354,20 @@ function App() {
                   key={document._id || index}
                   className={`flex items-center justify-between p-2 rounded border cursor-pointer ${
                     selectedDocument === document
-                      ? "bg-red-100 border-red-400"
-                      : "bg-white hover:bg-gray-100"
+                      ? "bg-[var(--highlight)] bg-opacity-10 border-[var(--highlight)]"
+                      : "bg-[var(--card-bg)] hover:bg-opacity-80"
                   }`}
                   onClick={() => handleDocumentSelect(document)}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-gray-700 truncate">
+                    <div className="text-sm text-[var(--text-primary)] truncate">
                       {document.filename}
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-[var(--text-secondary)]">
                       Cluster: {document.cluster_id?.slice(0, 8)}...
                     </div>
                   </div>
-                  <div className="text-xs text-gray-400 ml-2">
+                  <div className="text-xs text-[var(--text-secondary)] ml-2">
                     {document.total_sections} sections
                   </div>
                 </li>
@@ -322,7 +420,11 @@ function App() {
           {/* PDF Area */}
           <div className="flex-1 overflow-auto">
             {selectedFile ? (
-              <PdfViewer file={selectedFile} onTextSelection={handleTextSelection} />
+              <PdfViewer 
+                file={selectedFile} 
+                onTextSelection={handleTextSelection} 
+                onGenerateAudio={handleGeneratePodcast}
+              />
             ) : selectedDocument ? (
               <div className="p-6">
                 <div className="mb-4">
@@ -396,6 +498,12 @@ function App() {
                 <p><strong>Cluster ID:</strong> {selectedDocument.cluster_id}</p>
                 <p><strong>Sections:</strong> {selectedDocument.total_sections}</p>
                 <p><strong>Document ID:</strong> {selectedDocument._id}</p>
+                <button
+                  onClick={() => handleViewOriginalPdf(selectedDocument._id)}
+                  className="mt-3 w-full bg-blue-500 text-white px-3 py-2 rounded hover:bg-blue-600 flex items-center justify-center"
+                >
+                  <span className="mr-2">📄</span> View Original PDF
+                </button>
               </div>
             </div>
           )}
@@ -404,13 +512,33 @@ function App() {
           <div className="bg-white rounded p-4 shadow mb-4">
             <h3 className="font-medium mb-2">⭐ Selected Text</h3>
             {selectedText ? (
-              <blockquote className="border-l-4 border-red-500 pl-3 italic text-gray-700">
-                {selectedText}
-              </blockquote>
+              <>
+                <blockquote className="border-l-4 border-red-500 pl-3 italic text-gray-700 mb-3">
+                  {selectedText}
+                </blockquote>
+                <button
+                  onClick={handleGeneratePodcast}
+                  disabled={isGeneratingPodcast}
+                  className={`w-full py-2 px-3 rounded text-white flex items-center justify-center ${isGeneratingPodcast ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
+                >
+                  {isGeneratingPodcast ? '🔄 Generating...' : '🔊 Generate Audio Overview'}
+                </button>
+              </>
             ) : (
               <p className="text-sm text-gray-500">No text selected</p>
             )}
           </div>
+          
+          {/* Podcast Player */}
+          {podcastAudioUrl && (
+            <div className="bg-white rounded p-4 shadow mb-4">
+              <h3 className="font-medium mb-2">🎧 Audio Overview</h3>
+              <audio controls className="w-full" src={podcastAudioUrl}></audio>
+              <div className="text-xs text-gray-500 mt-2">
+                Audio ID: {podcastAudioId}
+              </div>
+            </div>
+          )}
 
           {/* Snippets */}
           <Snippets 
@@ -420,28 +548,51 @@ function App() {
             isLoading={isSearchingSnippets}
           />
 
+          {/* Insights Panel */}
+          <InsightPanel 
+            contradictions={contradictions} 
+            alternateViewpoints={alternateViewpoints} 
+          />
+
           {/* Options */}
-          <div className="flex gap-2 mb-4">
-            <button className="flex-1 p-2 border rounded bg-white">
-              💡 Insights
+          <div className="flex space-x-4 mb-4 border-b border-[var(--border-color)]">
+            <button
+              className={`px-4 py-2 ${activeTab === 'snippets' ? 'text-[var(--highlight)] border-b-2 border-[var(--highlight)] -mb-px' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              onClick={() => setActiveTab('snippets')}
+            >
+              Snippets
             </button>
-            <button className="flex-1 p-2 border rounded bg-white">
-              🎙️ Podcast
+            <button
+              className={`px-4 py-2 ${activeTab === 'insights' ? 'text-[var(--highlight)] border-b-2 border-[var(--highlight)] -mb-px' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              onClick={() => setActiveTab('insights')}
+            >
+              Insights
+            </button>
+            <button
+              className={`px-4 py-2 ${activeTab === 'podcast' ? 'text-[var(--highlight)] border-b-2 border-[var(--highlight)] -mb-px' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              onClick={() => setActiveTab('podcast')}
+            >
+              Podcast
+            </button>
+            <button
+              className={`px-4 py-2 ${activeTab === 'explorer' ? 'text-[var(--highlight)] border-b-2 border-[var(--highlight)] -mb-px' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              onClick={() => setActiveTab('explorer')}
+            >
+              Explorer
             </button>
           </div>
 
           {/* Podcast Mode */}
-          <h3 className="font-medium mb-2">Podcast Mode</h3>
-          <button className="bg-red-600 text-white px-4 py-2 rounded mb-3">
-            Generate
-          </button>
-          <div className="bg-white rounded p-6 text-center border">
-            <div className="text-4xl mb-2">🎙️</div>
-            <p className="text-sm text-gray-600">
-              Generate an AI podcast from your selected text and related
-              snippets. Click "Generate" to create your personalized podcast.
-            </p>
-          </div>
+            <div className="bg-[var(--card-bg)] rounded p-6 text-center border border-[var(--border-color)]">
+              <div className="text-4xl mb-2">🎙️</div>
+              <p className="text-sm text-[var(--text-secondary)]">
+                Generate an AI podcast from your selected text and related
+                snippets. Click "Generate" to create your personalized podcast.
+              </p>
+              <button className="mt-4 bg-[var(--highlight)] text-white px-4 py-2 rounded hover:bg-[var(--highlight-hover)] transition-colors">
+                Generate Podcast
+              </button>
+            </div>
         </div>
       </div>
     </div>

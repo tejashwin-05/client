@@ -22,6 +22,24 @@ export const apiService = {
     }
   },
 
+  // Get PDF file by document ID
+  async getDocumentPdf(documentId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/pdf`, {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch PDF: ${response.status}`);
+      }
+      
+      return await response.blob();
+    } catch (error) {
+      console.error('Error fetching PDF:', error);
+      throw error;
+    }
+  },
+  
   // Get documents by cluster ID
   async getDocumentsByCluster(clusterId) {
     try {
@@ -82,6 +100,51 @@ export const apiService = {
       return await response.json();
     } catch (error) {
       console.error('Error performing semantic search:', error);
+      throw error;
+    }
+  },
+  
+  // Generate podcast audio from selected text and insights
+  async generatePodcast(selectedText, snippets, contradictions, alternateViewpoints) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/audio/generate-podcast`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selected_text: selectedText,
+          snippets: snippets,
+          contradictions: contradictions,
+          alternate_viewpoints: alternateViewpoints
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Podcast generation failed: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error generating podcast:', error);
+      throw error;
+    }
+  },
+  
+  // Get podcast audio by ID
+  async getPodcastAudio(audioId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/audio/podcast/${audioId}`, {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch podcast audio: ${response.status}`);
+      }
+      
+      return await response.blob();
+    } catch (error) {
+      console.error('Error fetching podcast audio:', error);
       throw error;
     }
   },
